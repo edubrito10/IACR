@@ -1,0 +1,8 @@
+{
+  "auc": 0.9614666666666666,
+  "best_threshold": 0.49085038900375366,
+  "n_positive_pairs": 150,
+  "n_negative_pairs": 150,
+  "n_failed_detections": 0,
+  "failed_images": []
+}

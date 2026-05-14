@@ -183,3 +183,57 @@ print("  img_sizes.npy    — dimensões das imagens originais")
 print("  pair_details.npy — pares com scores e labels")
 print("  roc_curve.png    — curva ROC")
 print("  model_results.json — métricas gerais")
+
+# --- Exportar resumo legivel em TXT ------------------------------------------
+with open(OUTPUT_DIR / "resumo_modelo.txt", "w", encoding="utf-8") as f:
+
+    f.write("=" * 60 + "\n")
+    f.write("RESUMO DO MODELO - FaceNet + MTCNN no LFW\n")
+    f.write("=" * 60 + "\n\n")
+
+    # Metricas gerais
+    f.write("[METRICAS GERAIS]\n")
+    f.write(f"  AUC:                  {roc_auc:.4f}\n")
+    f.write(f"  Melhor threshold:     {best_thresh:.4f}\n")
+    f.write(f"  Pares positivos:      {len(positive_pairs)}\n")
+    f.write(f"  Pares negativos:      {len(negative_pairs)}\n")
+    f.write(f"  Imagens processadas:  {len(embeddings)}\n")
+    f.write(f"  Faces nao detetadas:  {len(failed)}\n\n")
+
+    # Imagens com falha de detecao
+    if failed:
+        f.write("[IMAGENS SEM FACE DETETADA]\n")
+        for img in failed:
+            f.write(f"  {img}\n")
+        f.write("\n")
+
+    # Landmarks por imagem
+    f.write("[LANDMARKS POR IMAGEM]\n")
+    f.write("  Formato: olho_esq | olho_dir | nariz | boca_esq | boca_dir\n\n")
+    for key, lm in sorted(landmarks.items()):
+        le = lm["left_eye"]
+        re = lm["right_eye"]
+        no = lm["nose"]
+        ml = lm["mouth_left"]
+        mr = lm["mouth_right"]
+        f.write(f"  {key}\n")
+        f.write(f"    olho_esq:  ({le[0]:.1f}, {le[1]:.1f})\n")
+        f.write(f"    olho_dir:  ({re[0]:.1f}, {re[1]:.1f})\n")
+        f.write(f"    nariz:     ({no[0]:.1f}, {no[1]:.1f})\n")
+        f.write(f"    boca_esq:  ({ml[0]:.1f}, {ml[1]:.1f})\n")
+        f.write(f"    boca_dir:  ({mr[0]:.1f}, {mr[1]:.1f})\n")
+    f.write("\n")
+
+    # Todos os pares com score e resultado
+    f.write("[PARES - SCORE E CLASSIFICACAO]\n")
+    f.write(f"  {'IMG1':<40} {'IMG2':<40} {'SCORE':>7}  {'LABEL':>9}  {'PRED':>9}  RESULTADO\n")
+    f.write("  " + "-" * 115 + "\n")
+    for d in sorted(details, key=lambda x: x["score"], reverse=True):
+        pred      = 1 if d["score"] >= best_thresh else 0
+        correto   = pred == d["label"]
+        resultado = "OK" if correto else "ERRO"
+        label_str = "mesma"     if d["label"] == 1 else "diferente"
+        pred_str  = "mesma"     if pred       == 1 else "diferente"
+        f.write(f"  {d['img1']:<40} {d['img2']:<40} {d['score']:>7.4f}  {label_str:>9}  {pred_str:>9}  {resultado}\n")
+
+print("  resumo_modelo.txt -- resumo legivel com landmarks e pares")

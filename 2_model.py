@@ -10,7 +10,7 @@ import json
 from itertools import combinations
 import random
 
-# ─── Configuração ────────────────────────────────────────────────────────────
+# configuração
 DATA_DIR   = Path("data/lfw")
 OUTPUT_DIR = Path("outputs")
 OUTPUT_DIR.mkdir(exist_ok=True)
@@ -18,9 +18,7 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"A usar dispositivo: {device}")
 
-# ─── Carregar modelos ─────────────────────────────────────────────────────────
-print("A carregar MTCNN e FaceNet...")
-# return_prob=False por omissão; landmarks=True ativa os pontos faciais
+# carregar os modelos MTCNN + FaceNet
 mtcnn = MTCNN(
     image_size=160,
     margin=20,
@@ -29,20 +27,20 @@ mtcnn = MTCNN(
 )
 facenet = InceptionResnetV1(pretrained="vggface2").eval().to(device)
 
-# ─── Extrair embeddings + landmarks ──────────────────────────────────────────
+# extração de embeddings e landmarks
 def get_embedding_and_landmarks(img_path: Path):
     """
-    Deteta a face, extrai o embedding e os landmarks faciais.
+    -> deteta a face, extrai o embedding e os landmarks faciais.
 
-    O MTCNN devolve landmarks como array (5, 2) com os pontos:
+    -> o MTCNN devolve landmarks como array (5, 2) com os pontos:
         0 → olho esquerdo
         1 → olho direito
         2 → nariz
         3 → canto esquerdo da boca
         4 → canto direito da boca
-    Coordenadas em píxeis relativos à imagem ORIGINAL (antes do crop).
+    -> coordenadas em píxeis relativos à imagem ORIGINAL (antes do crop).
 
-    Devolve:
+    -> devolve:
         embedding  : np.ndarray (512,)  ou None
         landmarks  : dict com chaves 'left_eye', 'right_eye', 'nose',
                      'mouth_left', 'mouth_right'  ou None
@@ -51,13 +49,12 @@ def get_embedding_and_landmarks(img_path: Path):
     img = Image.open(img_path).convert("RGB")
     img_size = img.size  # (W, H)
 
-    # detect() devolve boxes, probs, landmarks  (landmarks shape: (1, 5, 2))
-    boxes, probs, lm = mtcnn.detect(img, landmarks=True)
+    boxes, probs, lm = mtcnn.detect(img, landmarks=True) # detect() devolve boxes, probs, landmarks  (landmarks shape: (1, 5, 2))
 
     if boxes is None or lm is None:
         return None, None, img_size
 
-    # Usar a face com maior probabilidade (índice 0 já é a melhor)
+    # usar a face com maior probabilidade (índice 0 já é a melhor)
     face_tensor = mtcnn(img)
     if face_tensor is None:
         return None, None, img_size
@@ -78,7 +75,7 @@ def get_embedding_and_landmarks(img_path: Path):
     return emb.squeeze().cpu().numpy(), landmarks, img_size
 
 
-print("A extrair embeddings e landmarks...")
+print("A extrair embeddings e landmarks")
 embeddings = {}   # { "pessoa/0.jpg": np.ndarray }
 landmarks  = {}   # { "pessoa/0.jpg": dict }
 img_sizes  = {}   # { "pessoa/0.jpg": (W, H) }
@@ -96,11 +93,11 @@ for person_dir in sorted(DATA_DIR.iterdir()):
             img_sizes[key]  = sz
         else:
             failed.append(key)
-            print(f"  ⚠ Face não detetada: {key}")
+            print(f"Face não detetada: {key}")
 
 print(f"\nEmbeddings extraídos: {len(embeddings)}  |  Falhas: {len(failed)}")
 
-# ─── Construir pares ──────────────────────────────────────────────────────────
+# construção de pares
 people = {}
 for key in embeddings:
     name = key.split("/")[0]
@@ -122,7 +119,7 @@ while len(negative_pairs) < len(positive_pairs):
 
 print(f"Pares positivos: {len(positive_pairs)}  |  Pares negativos: {len(negative_pairs)}")
 
-# ─── Similaridade coseno ──────────────────────────────────────────────────────
+# similiradiedade de coseno
 def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
 
@@ -140,12 +137,12 @@ for k1, k2 in negative_pairs:
     scores.append(s); labels.append(0)
     details.append({"img1": k1, "img2": k2, "score": s, "label": 0})
 
-# ─── Curva ROC + AUC ─────────────────────────────────────────────────────────
+# curva ROC + AUC
 fpr, tpr, thresholds = roc_curve(labels, scores)
 roc_auc = auc(fpr, tpr)
 print(f"\nAUC: {roc_auc:.4f}")
 
-best_idx    = np.argmax(tpr - fpr)
+best_idx = np.argmax(tpr - fpr)
 best_thresh = float(thresholds[best_idx])
 print(f"Melhor threshold: {best_thresh:.4f}")
 
@@ -156,9 +153,9 @@ plt.xlabel("False Positive Rate"); plt.ylabel("True Positive Rate")
 plt.title("Curva ROC – FaceNet no LFW"); plt.legend(); plt.tight_layout()
 plt.savefig(OUTPUT_DIR / "roc_curve.png", dpi=150)
 plt.close()
-print("Curva ROC guardada em outputs/roc_curve.png")
+print("Curva ROC está guardada em outputs/roc_curve.png")
 
-# ─── Guardar tudo ─────────────────────────────────────────────────────────────
+# guardar tudo 
 results = {
     "auc": roc_auc,
     "best_threshold": best_thresh,
@@ -170,7 +167,7 @@ results = {
 with open(OUTPUT_DIR / "model_results.json", "w") as f:
     json.dump(results, f, indent=2)
 
-# Embeddings, landmarks e detalhes dos pares — usados nos scripts seguintes
+# embeddings, landmarks e detalhes dos pares — usados nos proximos scripts
 np.save(OUTPUT_DIR / "embeddings.npy",    embeddings)
 np.save(OUTPUT_DIR / "landmarks.npy",     landmarks)
 np.save(OUTPUT_DIR / "img_sizes.npy",     img_sizes)
@@ -184,7 +181,7 @@ print("  pair_details.npy — pares com scores e labels")
 print("  roc_curve.png    — curva ROC")
 print("  model_results.json — métricas gerais")
 
-# --- Exportar resumo legivel em TXT ------------------------------------------
+# resumo txt
 with open(OUTPUT_DIR / "resumo_modelo.txt", "w", encoding="utf-8") as f:
 
     f.write("=" * 60 + "\n")
@@ -200,14 +197,14 @@ with open(OUTPUT_DIR / "resumo_modelo.txt", "w", encoding="utf-8") as f:
     f.write(f"  Imagens processadas:  {len(embeddings)}\n")
     f.write(f"  Faces nao detetadas:  {len(failed)}\n\n")
 
-    # Imagens com falha de detecao
+    # imagens com falha de detecao
     if failed:
         f.write("[IMAGENS SEM FACE DETETADA]\n")
         for img in failed:
             f.write(f"  {img}\n")
         f.write("\n")
 
-    # Landmarks por imagem
+    # landmarks por imagem
     f.write("[LANDMARKS POR IMAGEM]\n")
     f.write("  Formato: olho_esq | olho_dir | nariz | boca_esq | boca_dir\n\n")
     for key, lm in sorted(landmarks.items()):
@@ -224,7 +221,7 @@ with open(OUTPUT_DIR / "resumo_modelo.txt", "w", encoding="utf-8") as f:
         f.write(f"    boca_dir:  ({mr[0]:.1f}, {mr[1]:.1f})\n")
     f.write("\n")
 
-    # Todos os pares com score e resultado
+    # todos os pares com score e resultado
     f.write("[PARES - SCORE E CLASSIFICACAO]\n")
     f.write(f"  {'IMG1':<40} {'IMG2':<40} {'SCORE':>7}  {'LABEL':>9}  {'PRED':>9}  RESULTADO\n")
     f.write("  " + "-" * 115 + "\n")
@@ -236,4 +233,4 @@ with open(OUTPUT_DIR / "resumo_modelo.txt", "w", encoding="utf-8") as f:
         pred_str  = "mesma"     if pred       == 1 else "diferente"
         f.write(f"  {d['img1']:<40} {d['img2']:<40} {d['score']:>7.4f}  {label_str:>9}  {pred_str:>9}  {resultado}\n")
 
-print("  resumo_modelo.txt -- resumo legivel com landmarks e pares")
+print("resumo_modelo.txt -- resumo com landmarks e pares")

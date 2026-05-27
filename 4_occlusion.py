@@ -30,13 +30,13 @@ THRESHOLD    = results["best_threshold"]
 
 # --- Funcoes auxiliares -------------------------------------------------------
 
-def get_face_tensor(img_path):
+def get_face_tensor(img_path):                                          # deteta e recorta a face usando o MTCNN
     img = Image.open(img_path).convert("RGB")
     t   = mtcnn(img)
     return t.unsqueeze(0).to(device) if t is not None else None
 
 
-def cosine_similarity(a, b):
+def cosine_similarity(a, b):                                                    #calcula a similaridade coseno entre dois embeddings
     return float(F.cosine_similarity(a, b).item())
 
 
@@ -45,7 +45,7 @@ def get_embedding_tensor(face_tensor):
         return facenet(face_tensor)
 
 
-def remap_landmarks(lm_orig, img_orig_size, crop_size=160, margin=20):
+def remap_landmarks(lm_orig, img_orig_size, crop_size=160, margin=20):   #converte os landmarks da imagem original para as coordenadas da face recortada
     pts    = np.array(list(lm_orig.values()))
     cx, cy = pts.mean(axis=0)
     iod_orig  = np.linalg.norm(
@@ -67,8 +67,8 @@ def landmarks_to_boxes(lm, img_w=160, img_h=160):
     ml = np.array(lm["mouth_left"])
     mr = np.array(lm["mouth_right"])
 
-    iod = np.linalg.norm(re - le)
-    pad = iod * 0.35
+    iod = np.linalg.norm(re - le)       #distancia interocular. Usada como referencia para o tamanho das regioes
+    pad = iod * 0.35                    #tamanho base para as regioes de 35% da distancia interocular
 
     def box(cx, cy, half_w, half_h):
         x1 = max(0,     int(cx - half_w))
@@ -87,27 +87,16 @@ def landmarks_to_boxes(lm, img_w=160, img_h=160):
     }
 
 
-def occlude_region(face_tensor, box, fill_value=0.0):
-    """
-    Tapa uma regiao do tensor da face com uma cor solida.
-    fill_value=0.0 -> preto (neutro para o modelo)
-    Devolve uma copia do tensor com a regiao tapada.
-    """
-    occluded = face_tensor.clone()
+def occlude_region(face_tensor, box, fill_value=0.0):   #fill_value preenche com zeros(preto)
+    
+    occluded = face_tensor.clone()         #fazer copia para nao modificar o tensor original (.clone())
     x1, y1, x2, y2 = box
-    occluded[0, :, y1:y2, x1:x2] = fill_value
+    occluded[0, :, y1:y2, x1:x2] = fill_value    # seleciona a região a tapar em todos os canais RGB simultaneamente
     return occluded
 
 
 def analyze_pair_occlusion(key1, key2, label, score_base):
-    """
-    Para um par de imagens:
-    1. Calcula o score base (sem oclusao)
-    2. Para cada regiao, tapa a regiao na img1 e recalcula o score
-    3. A queda no score indica a importancia dessa regiao
 
-    Devolve dicionario com queda de score por regiao.
-    """
     img_path1 = DATA_DIR / key1.split("/")[0] / key1.split("/")[1]
     img_path2 = DATA_DIR / key2.split("/")[0] / key2.split("/")[1]
 
@@ -132,13 +121,14 @@ def analyze_pair_occlusion(key1, key2, label, score_base):
     score_base_calc = cosine_similarity(emb1_base, emb2)
 
     # Score por regiao tapada
+    #para cadaregiao, tapa-a e recalcula o score
     region_drops = {}
     for region, box in boxes.items():
         face1_occ   = occlude_region(face1, box)
         emb1_occ    = get_embedding_tensor(face1_occ)
         score_occ   = cosine_similarity(emb1_occ, emb2)
         drop        = score_base_calc - score_occ   # queda no score
-        region_drops[region] = {
+        region_drops[region] = {                                    #guarda os resultados para esta regiao 
             "score_base":     round(score_base_calc, 4),
             "score_occluded": round(score_occ,       4),
             "drop":           round(drop,            4),
@@ -169,7 +159,7 @@ drops_pos = {r: [] for r in REGIONS}
 drops_neg = {r: [] for r in REGIONS}
 all_results = []
 
-for d in selected_pos:
+for d in selected_pos:                          #calcula as quedas para cada par positivo e acumula os resultados para fazer media
     res = analyze_pair_occlusion(d["img1"], d["img2"], d["label"], d["score"])
     if res is None:
         continue
@@ -181,7 +171,7 @@ for d in selected_pos:
         "regions": res
     })
 
-for d in selected_neg:
+for d in selected_neg:                                          #calcula as quedas para cada par negativo e acumula os resultados para fazer media
     res = analyze_pair_occlusion(d["img1"], d["img2"], d["label"], d["score"])
     if res is None:
         continue
@@ -236,15 +226,16 @@ plt.savefig(OCCLUSION_DIR / "region_importance.png", dpi=150)
 plt.close()
 print("\nGrafico guardado em outputs/occlusion/region_importance.png")
 
+
+
+
+
+
 # --- Visualizacao de exemplos -------------------------------------------------
 # Gerar imagem com os 5 paineis de oclusao para os primeiros 3 pares positivos
 
 def visualize_occlusion(pair_data, save_path):
-    """
-    Gera figura com 7 paineis:
-        face original | tapada olho_esq | tapada olho_dir |
-        tapada nariz  | tapada boca     | tapada testa    | grafico de quedas
-    """
+    
     key1 = pair_data["img1"]
     img_path1 = DATA_DIR / key1.split("/")[0] / key1.split("/")[1]
 

@@ -32,42 +32,32 @@ THRESHOLD    = results["best_threshold"]
 # --- Grad-CAM -----------------------------------------------------------------
 
 class GradCAM:
-    def __init__(self, model, target_layer):
+    def __init__(self, model, target_layer):  #inicialização e registo dos hooks
         self.model       = model
         self.gradients   = None
         self.activations = None
-        target_layer.register_forward_hook(self._save_activation)
-        target_layer.register_full_backward_hook(self._save_gradient)
+        target_layer.register_forward_hook(self._save_activation) #O forward hook guarda as ativações — o que a camada "viu"
+        target_layer.register_full_backward_hook(self._save_gradient) #O backward hook guarda os gradientes — o que foi importante para a decisão
 
-    def _save_activation(self, module, input, output):
+    def _save_activation(self, module, input, output):  #guarda o que a camada produziu durante o forward
         self.activations = output.detach()
 
-    def _save_gradient(self, module, grad_input, grad_output):
+    def _save_gradient(self, module, grad_input, grad_output):  #guarda os gradientes que chegaram durante o backward
         self.gradients = grad_output[0].detach()
 
-    def __call__(self, face_tensor, ref_embedding=None):
-        """
-        Gera mapa Grad-CAM normalizado [0,1] com shape (160, 160).
-
-        CORRECOES aplicadas vs versao anterior:
-        1. Se ref_embedding for fornecido, usa similaridade coseno como sinal
-           em vez da norma L2 -- o mapa fica orientado a decisao do par,
-           produzindo activacoes muito mais focadas e coloridas.
-        2. Normalizacao por percentil (p1-p99) em vez de min-max -- evita que
-           um unico pixel outlier "esmague" todo o mapa deixando-o azulado.
-        3. .detach() antes de .cpu().numpy() para evitar o RuntimeError de grad.
-        """
+    def __call__(self, face_tensor, ref_embedding=None):   #calculo do mapa 
+       
         self.model.zero_grad()
         face_tensor = face_tensor.to(device).requires_grad_(True)
 
         embedding = self.model(face_tensor)   # (1, 512)
 
         if ref_embedding is not None:
-            score = F.cosine_similarity(embedding, ref_embedding.to(device))
+            score = F.cosine_similarity(embedding, ref_embedding.to(device))  #usar a similaridade coseno com o embedding do par como sinal. Isto significa que os gradientes mostram "o que nesta imagem contribuiu para a semelhança com aquela imagem específica" 
         else:
             score = embedding.norm(p=2, dim=1)
 
-        score.backward()
+        score.backward()               # dispara a retropropagação — é aqui que os gradientes são calculados e os hooks capturam tudo
 
         grads = self.gradients
         acts  = self.activations
@@ -75,12 +65,15 @@ class GradCAM:
         if grads is None or acts is None:
             return np.zeros((160, 160), dtype=np.float32)
 
-        weights = grads.mean(dim=(2, 3), keepdim=True)
-        cam     = (weights * acts).sum(dim=1).squeeze()
-        cam     = F.relu(cam)
+        weights = grads.mean(dim=(2, 3), keepdim=True)    #para cada canal, calcula um peso único — "quão importante foi este canal para a decisão?"
+        cam     = (weights * acts).sum(dim=1).squeeze()   #combina todos os canais num único mapa 2D, pesado pela importância de cada um
+        cam     = F.relu(cam)                             #mantém apenas as ativações positivas
 
         cam_np = cam.detach().cpu().numpy()
         cam_np = cv2.resize(cam_np, (160, 160))
+
+
+
 
         # Normalizacao robusta por percentil
         p1, p99 = np.percentile(cam_np, 1), np.percentile(cam_np, 99)
@@ -93,8 +86,9 @@ class GradCAM:
 
 
 # Tentar repeat_3[-1] (mais rico em features espaciais); fallback para block8
+
 try:
-    target_layer = facenet.repeat_3[-1]
+    target_layer = facenet.repeat_3[-1]    #esta camada é o ultimo bloco residual profundo antes do global average pooling
     print("Camada alvo: repeat_3[-1]")
 except (AttributeError, IndexError):
     target_layer = facenet.block8
@@ -105,8 +99,8 @@ gradcam = GradCAM(facenet, target_layer)
 # --- Funcoes auxiliares -------------------------------------------------------
 
 def get_face_tensor(img_path):
-    img = Image.open(img_path).convert("RGB")
-    t   = mtcnn(img)
+    img = Image.open(img_path).convert("RGB")          #abre a imagem e converte para RGB
+    t   = mtcnn(img)                                   #usa o MTCNN que deteta, recorta e alinha a face para 160x160
     return t.unsqueeze(0) if t is not None else None
 
 
@@ -117,8 +111,8 @@ def landmarks_to_boxes(lm, img_w=160, img_h=160):
     ml = np.array(lm["mouth_left"])
     mr = np.array(lm["mouth_right"])
 
-    iod = np.linalg.norm(re - le)
-    pad = iod * 0.35
+    iod = np.linalg.norm(re - le)                 #calcula distancia interocular 
+    pad = iod * 0.35                              #definir caixas 
 
     def box(cx, cy, half_w, half_h):
         x1 = max(0,     int(cx - half_w))
@@ -137,10 +131,10 @@ def landmarks_to_boxes(lm, img_w=160, img_h=160):
     }
 
 
-def overlay_heatmap(face_rgb, cam, alpha=0.45):
+def overlay_heatmap(face_rgb, cam, alpha=0.45):                                        #converte o mapa gradcam para uma imagem rbg
     heatmap = cv2.applyColorMap(np.uint8(255 * cam), cv2.COLORMAP_JET)
     heatmap = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)
-    blended = (1 - alpha) * face_rgb.astype(float) + alpha * heatmap.astype(float)
+    blended = (1 - alpha) * face_rgb.astype(float) + alpha * heatmap.astype(float)     #mistura a imagem com o heatmap usando alpha 45%
     return np.uint8(np.clip(blended, 0, 255))
 
 
@@ -159,8 +153,8 @@ def remap_landmarks(lm_orig, img_orig_size, crop_size=160, margin=20):
     return remapped
 
 
-def get_ref_embedding(key, pair_details):
-    """Devolve o embedding do par desta imagem como tensor, ou None."""
+def get_ref_embedding(key, pair_details):   #procura nos pair_details o par desta imagem e devolve o embedding do parceiro, se disponível.
+    #Devolve o embedding do par desta imagem como tensor, ou None.
     for d in pair_details:
         if d["img1"] == key:
             partner = d["img2"]
